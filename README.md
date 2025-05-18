@@ -156,6 +156,7 @@ The application follows a layered architecture:
 ```
 
 ## API Endpoints
+You may use frontend-test folder to test the project.
 
 ### Authentication
 
@@ -164,6 +165,8 @@ The application follows a layered architecture:
 ```
 POST /api/auth/register
 ```
+![image](https://github.com/user-attachments/assets/0c1f2b89-8a4d-4a06-be4d-2ea7d72ee60b)
+
 
 **Request Body:**
 ```json
@@ -192,6 +195,7 @@ POST /api/auth/register
 ```
 POST /api/auth/login
 ```
+![image](https://github.com/user-attachments/assets/4fa17975-8fa1-4706-a5b1-2c43eb7e49d3)
 
 **Request Body:**
 ```json
@@ -221,6 +225,7 @@ POST /api/auth/login
 ```
 POST /api/documents
 ```
+![image](https://github.com/user-attachments/assets/e3533ea9-0001-4925-91d9-24a9af91291f)
 
 **Request Body:**
 ```json
@@ -254,6 +259,7 @@ POST /api/documents
 ```
 GET /api/documents/{documentId}
 ```
+![image](https://github.com/user-attachments/assets/84107de4-7c29-4c73-89eb-c35d2d6c65eb)
 
 **Response:**
 ```json
@@ -285,6 +291,7 @@ GET /api/documents/{documentId}
 ```
 PUT /api/documents/{documentId}
 ```
+![image](https://github.com/user-attachments/assets/7e6af66e-9d24-423b-ac84-e7e64b07c3e0)
 
 **Request Body:**
 ```json
@@ -325,6 +332,7 @@ PUT /api/documents/{documentId}
 ```
 DELETE /api/documents/{documentId}
 ```
+![image](https://github.com/user-attachments/assets/b822309d-5576-4cf1-be30-de7429fa9805)
 
 **Response Codes:**
 - `204 No Content`: Document deleted successfully
@@ -338,6 +346,7 @@ DELETE /api/documents/{documentId}
 ```
 POST /api/documents/{documentId}/share
 ```
+![image](https://github.com/user-attachments/assets/5fdb5e2d-aab4-4845-921b-2636cf957da1)
 
 **Request Body:**
 ```json
@@ -380,6 +389,7 @@ Note: The `accessLevel` field can be either "VIEW" or "EDIT".
 ```
 GET /api/documents/owned
 ```
+![image](https://github.com/user-attachments/assets/fb2c4d55-7496-4106-995a-36bd26aedb64)
 
 **Response:**
 ```json
@@ -420,6 +430,7 @@ GET /api/documents/owned
 ```
 GET /api/documents/shared
 ```
+![image](https://github.com/user-attachments/assets/bc9588fa-c037-4c3d-904b-768c07b9d691)
 
 **Response:**
 ```json
@@ -465,6 +476,7 @@ GET /api/documents/shared
 ```
 GET /api/documents/{documentId}/versions
 ```
+![image](https://github.com/user-attachments/assets/093320f7-599a-46df-b3d3-27e290cb0f1c)
 
 **Response:**
 ```json
