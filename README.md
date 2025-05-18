@@ -24,10 +24,44 @@ A backend for a real-time collaborative document editor, where multiple users ca
 
 The application follows a layered architecture:
 
-1. **Controller Layer**: Handles HTTP requests and WebSocket messages
-2. **Service Layer**: Contains business logic for document management, authentication, etc.
-3. **Repository Layer**: Interfaces with the MongoDB database
-4. **Utility Layer**: Contains helper classes for versioning, conflict resolution, etc.
+```
+┌─────────────────────────────────────────────────────────┐
+│                     Client Layer                        │
+│  (Web Browsers, Mobile Apps, Desktop Applications)      │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                      API Layer                          │
+│  ┌───────────────┐  ┌────────────────┐  ┌────────────┐  │
+│  │AuthController │  │DocumentController│ │WebSocketCtrl│ │
+│  └───────────────┘  └────────────────┘  └────────────┘  │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                    Service Layer                        │
+│  ┌─────────────┐ ┌──────────┐ ┌────────────┐ ┌───────┐  │
+│  │AuthService  │ │DocService│ │WebSocketSvc│ │JwtSvc │  │
+│  └─────────────┘ └──────────┘ └────────────┘ └───────┘  │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                  Repository Layer                       │
+│     ┌───────────────────┐    ┌────────────────────┐     │
+│     │ UserRepository    │    │ DocumentRepository │     │
+│     └───────────────────┘    └────────────────────┘     │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                     Data Layer                          │
+│        ┌─────────────────┐    ┌─────────────┐           │
+│        │     MongoDB     │    │    Redis    │           │
+│        └─────────────────┘    └─────────────┘           │
+└─────────────────────────────────────────────────────────┘
+```
 
 ### Key Components
 
@@ -39,33 +73,571 @@ The application follows a layered architecture:
 - **ConflictResolutionUtil**: Resolves conflicts between concurrent edits
 - **VersioningUtil**: Manages document versions
 
+## Authentication Flow
+
+```
+┌──────────┐                                  ┌────────────┐                                ┌─────────────┐
+│  Client  │                                  │API Gateway │                                │Auth Service │
+└────┬─────┘                                  └──────┬─────┘                                └──────┬──────┘
+     │                                              │                                              │
+     │ 1. POST /api/auth/register or /api/auth/login│                                              │
+     │ ─────────────────────────────────────────────>                                              │
+     │                                              │                                              │
+     │                                              │ 2. Forward authentication request            │
+     │                                              │ ─────────────────────────────────────────────>
+     │                                              │                                              │
+     │                                              │                                              │
+     │                                              │ 3. Validate credentials & generate JWT       │
+     │                                              │ <─────────────────────────────────────────────
+     │                                              │                                              │
+     │ 4. Return JWT token                          │                                              │
+     │ <─────────────────────────────────────────────                                              │
+     │                                              │                                              │
+     │ 5. Include JWT in Authorization header       │                                              │
+     │ ─────────────────────────────────────────────>                                              │
+     │                                              │                                              │
+     │                                              │ 6. Validate JWT token                        │
+     │                                              │ ─────────────────────────────────────────────>
+     │                                              │                                              │
+     │                                              │ 7. Token valid/invalid response              │
+     │                                              │ <─────────────────────────────────────────────
+     │                                              │                                              │
+     │ 8. Return requested resource or 401 error    │                                              │
+     │ <─────────────────────────────────────────────                                              │
+     │                                              │                                              │
+┌────┴─────┐                                  ┌──────┴─────┐                                ┌──────┴──────┐
+│  Client  │                                  │API Gateway │                                │Auth Service │
+└──────────┘                                  └────────────┘                                └─────────────┘
+```
+
+## WebSocket Communication Flow
+
+```
+┌──────────┐                                  ┌────────────────┐                            ┌─────────────┐
+│  Client  │                                  │WebSocketService│                            │DocumentSvc  │
+└────┬─────┘                                  └───────┬────────┘                            └──────┬──────┘
+     │                                                │                                            │
+     │ 1. Connect to WebSocket (/ws)                  │                                            │
+     │ ─────────────────────────────────────────────────>                                          │
+     │                                                │                                            │
+     │ 2. Subscribe to topics                         │                                            │
+     │ (/topic/document.{id}, /topic/document.{id}.join)                                           │
+     │ ─────────────────────────────────────────────────>                                          │
+     │                                                │                                            │
+     │ 3. Send message to join document               │                                            │
+     │ (/app/document.join)                           │                                            │
+     │ ─────────────────────────────────────────────────>                                          │
+     │                                                │                                            │
+     │                                                │ 4. Process join request                    │
+     │                                                │ ─────────────────────────────────────────────>
+     │                                                │                                            │
+     │                                                │ 5. Update active users                     │
+     │                                                │ <─────────────────────────────────────────────
+     │                                                │                                            │
+     │                                                │ 6. Broadcast join notification             │
+     │ <─────────────────────────────────────────────────                                          │
+     │                                                │                                            │
+     │ 7. Send document updates                       │                                            │
+     │ (/app/document.update)                         │                                            │
+     │ ─────────────────────────────────────────────────>                                          │
+     │                                                │                                            │
+     │                                                │ 8. Process update                          │
+     │                                                │ ─────────────────────────────────────────────>
+     │                                                │                                            │
+     │                                                │ 9. Save document version                   │
+     │                                                │ <─────────────────────────────────────────────
+     │                                                │                                            │
+     │                                                │ 10. Broadcast update to all subscribers    │
+     │ <─────────────────────────────────────────────────                                          │
+     │                                                │                                            │
+┌────┴─────┐                                  ┌───────┴────────┐                            ┌──────┴──────┐
+│  Client  │                                  │WebSocketService│                            │DocumentSvc  │
+└──────────┘                                  └────────────────┘                            └─────────────┘
+```
+
 ## API Endpoints
 
 ### Authentication
 
-- `POST /api/auth/register`: Register a new user
-- `POST /api/auth/authenticate`: Authenticate a user and get JWT tokens
+#### Register a new user
+
+```
+POST /api/auth/register
+```
+
+**Request Body:**
+```json
+{
+  "username": "johndoe",
+  "email": "john.doe@example.com",
+  "password": "securePassword123"
+}
+```
+
+**Response:**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiJ9..."
+}
+```
+
+**Response Codes:**
+- `200 OK`: User registered successfully
+- `400 Bad Request`: Username or email already exists
+- `500 Internal Server Error`: Server error
+
+#### Authenticate a user
+
+```
+POST /api/auth/login
+```
+
+**Request Body:**
+```json
+{
+  "username": "johndoe",
+  "password": "securePassword123"
+}
+```
+
+**Response:**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiJ9..."
+}
+```
+
+**Response Codes:**
+- `200 OK`: Authentication successful
+- `401 Unauthorized`: Invalid credentials
+- `500 Internal Server Error`: Server error
 
 ### Document Management
 
-- `POST /api/documents`: Create a new document
-- `GET /api/documents/{documentId}`: Get a document by ID
-- `PUT /api/documents/{documentId}`: Update a document
-- `DELETE /api/documents/{documentId}`: Delete a document
-- `POST /api/documents/{documentId}/share`: Share a document with another user
-- `GET /api/documents/owned`: Get all documents owned by the current user
-- `GET /api/documents/shared`: Get all documents shared with the current user
-- `GET /api/documents/{documentId}/versions`: Get document version history
+#### Create a new document
+
+```
+POST /api/documents
+```
+
+**Request Body:**
+```json
+{
+  "title": "My Document",
+  "content": "Initial content of the document"
+}
+```
+
+**Response:**
+```json
+{
+  "id": "60a1e2c3d4e5f6a7b8c9d0e1",
+  "title": "My Document",
+  "content": "Initial content of the document",
+  "owner": "johndoe",
+  "createdAt": "2023-05-16T12:00:00Z",
+  "updatedAt": "2023-05-16T12:00:00Z",
+  "sharedWith": []
+}
+```
+
+**Response Codes:**
+- `200 OK`: Document created successfully
+- `400 Bad Request`: Invalid request
+- `401 Unauthorized`: User not authenticated
+- `500 Internal Server Error`: Server error
+
+#### Get a document by ID
+
+```
+GET /api/documents/{documentId}
+```
+
+**Response:**
+```json
+{
+  "id": "60a1e2c3d4e5f6a7b8c9d0e1",
+  "title": "My Document",
+  "content": "Current content of the document",
+  "owner": "johndoe",
+  "createdAt": "2023-05-16T12:00:00Z",
+  "updatedAt": "2023-05-16T12:30:00Z",
+  "sharedWith": [
+    {
+      "username": "janedoe",
+      "accessLevel": "EDIT"
+    }
+  ]
+}
+```
+
+**Response Codes:**
+- `200 OK`: Document retrieved successfully
+- `401 Unauthorized`: User not authenticated
+- `403 Forbidden`: User does not have access to the document
+- `404 Not Found`: Document not found
+- `500 Internal Server Error`: Server error
+
+#### Update a document
+
+```
+PUT /api/documents/{documentId}
+```
+
+**Request Body:**
+```json
+{
+  "title": "Updated Document Title",
+  "content": "Updated content of the document"
+}
+```
+
+**Response:**
+```json
+{
+  "id": "60a1e2c3d4e5f6a7b8c9d0e1",
+  "title": "Updated Document Title",
+  "content": "Updated content of the document",
+  "owner": "johndoe",
+  "createdAt": "2023-05-16T12:00:00Z",
+  "updatedAt": "2023-05-16T13:00:00Z",
+  "sharedWith": [
+    {
+      "username": "janedoe",
+      "accessLevel": "EDIT"
+    }
+  ]
+}
+```
+
+**Response Codes:**
+- `200 OK`: Document updated successfully
+- `400 Bad Request`: Invalid request
+- `401 Unauthorized`: User not authenticated
+- `403 Forbidden`: User does not have edit access to the document
+- `404 Not Found`: Document not found
+- `500 Internal Server Error`: Server error
+
+#### Delete a document
+
+```
+DELETE /api/documents/{documentId}
+```
+
+**Response Codes:**
+- `204 No Content`: Document deleted successfully
+- `401 Unauthorized`: User not authenticated
+- `403 Forbidden`: User is not the owner of the document
+- `404 Not Found`: Document not found
+- `500 Internal Server Error`: Server error
+
+#### Share a document with another user
+
+```
+POST /api/documents/{documentId}/share
+```
+
+**Request Body:**
+```json
+{
+  "username": "janedoe",
+  "accessLevel": "EDIT"
+}
+```
+
+Note: The `accessLevel` field can be either "VIEW" or "EDIT".
+
+**Response:**
+```json
+{
+  "id": "60a1e2c3d4e5f6a7b8c9d0e1",
+  "title": "My Document",
+  "content": "Current content of the document",
+  "owner": "johndoe",
+  "createdAt": "2023-05-16T12:00:00Z",
+  "updatedAt": "2023-05-16T13:30:00Z",
+  "sharedWith": [
+    {
+      "username": "janedoe",
+      "accessLevel": "EDIT"
+    }
+  ]
+}
+```
+
+**Response Codes:**
+- `200 OK`: Document shared successfully
+- `400 Bad Request`: Invalid request or user not found
+- `401 Unauthorized`: User not authenticated
+- `403 Forbidden`: User is not the owner of the document
+- `404 Not Found`: Document not found
+- `500 Internal Server Error`: Server error
+
+#### Get all documents owned by the current user
+
+```
+GET /api/documents/owned
+```
+
+**Response:**
+```json
+[
+  {
+    "id": "60a1e2c3d4e5f6a7b8c9d0e1",
+    "title": "My Document 1",
+    "content": "Content of document 1",
+    "owner": "johndoe",
+    "createdAt": "2023-05-16T12:00:00Z",
+    "updatedAt": "2023-05-16T13:30:00Z",
+    "sharedWith": []
+  },
+  {
+    "id": "60a1e2c3d4e5f6a7b8c9d0e2",
+    "title": "My Document 2",
+    "content": "Content of document 2",
+    "owner": "johndoe",
+    "createdAt": "2023-05-17T10:00:00Z",
+    "updatedAt": "2023-05-17T11:00:00Z",
+    "sharedWith": [
+      {
+        "username": "janedoe",
+        "accessLevel": "VIEW"
+      }
+    ]
+  }
+]
+```
+
+**Response Codes:**
+- `200 OK`: Documents retrieved successfully
+- `401 Unauthorized`: User not authenticated
+- `500 Internal Server Error`: Server error
+
+#### Get all documents shared with the current user
+
+```
+GET /api/documents/shared
+```
+
+**Response:**
+```json
+[
+  {
+    "id": "60a1e2c3d4e5f6a7b8c9d0e3",
+    "title": "Shared Document 1",
+    "content": "Content of shared document 1",
+    "owner": "janedoe",
+    "createdAt": "2023-05-15T09:00:00Z",
+    "updatedAt": "2023-05-15T10:00:00Z",
+    "sharedWith": [
+      {
+        "username": "johndoe",
+        "accessLevel": "EDIT"
+      }
+    ]
+  },
+  {
+    "id": "60a1e2c3d4e5f6a7b8c9d0e4",
+    "title": "Shared Document 2",
+    "content": "Content of shared document 2",
+    "owner": "bobsmith",
+    "createdAt": "2023-05-18T14:00:00Z",
+    "updatedAt": "2023-05-18T15:00:00Z",
+    "sharedWith": [
+      {
+        "username": "johndoe",
+        "accessLevel": "VIEW"
+      }
+    ]
+  }
+]
+```
+
+**Response Codes:**
+- `200 OK`: Documents retrieved successfully
+- `401 Unauthorized`: User not authenticated
+- `500 Internal Server Error`: Server error
+
+#### Get document version history
+
+```
+GET /api/documents/{documentId}/versions
+```
+
+**Response:**
+```json
+[
+  {
+    "id": "v1-60a1e2c3d4e5f6a7b8c9d0e1",
+    "documentId": "60a1e2c3d4e5f6a7b8c9d0e1",
+    "content": "Initial content of the document",
+    "editor": "johndoe",
+    "timestamp": "2023-05-16T12:00:00Z",
+    "versionNumber": 1
+  },
+  {
+    "id": "v2-60a1e2c3d4e5f6a7b8c9d0e1",
+    "documentId": "60a1e2c3d4e5f6a7b8c9d0e1",
+    "content": "Updated content of the document",
+    "editor": "johndoe",
+    "timestamp": "2023-05-16T13:00:00Z",
+    "versionNumber": 2
+  },
+  {
+    "id": "v3-60a1e2c3d4e5f6a7b8c9d0e1",
+    "documentId": "60a1e2c3d4e5f6a7b8c9d0e1",
+    "content": "Further updated content with additional information",
+    "editor": "janedoe",
+    "timestamp": "2023-05-16T14:00:00Z",
+    "versionNumber": 3
+  }
+]
+```
+
+**Response Codes:**
+- `200 OK`: Document versions retrieved successfully
+- `401 Unauthorized`: User not authenticated
+- `403 Forbidden`: User does not have access to the document
+- `404 Not Found`: Document not found
+- `500 Internal Server Error`: Server error
 
 ### WebSocket Endpoints
 
-- `/ws`: WebSocket connection endpoint
-- `/app/document.update`: Send document updates
-- `/app/document.join`: Notify when a user joins a document
-- `/app/document.leave`: Notify when a user leaves a document
-- `/topic/document.{documentId}`: Receive document updates
-- `/topic/document.{documentId}.join`: Receive user join notifications
-- `/topic/document.{documentId}.leave`: Receive user leave notifications
+#### WebSocket Connection
+
+```
+GET /ws
+```
+
+This is the main WebSocket connection endpoint. Clients connect to this endpoint to establish a WebSocket connection.
+
+#### Document Load
+
+```
+SEND /app/document.load
+```
+
+**Message Payload:**
+```json
+{
+  "documentId": "60a1e2c3d4e5f6a7b8c9d0e1",
+  "userId": "johndoe",
+  "content": null,
+  "timestamp": "2023-05-16T15:00:00Z"
+}
+```
+
+This endpoint is used to load a document's content. The server will respond by sending the document content to the client.
+
+#### Document Update
+
+```
+SEND /app/document.update
+```
+
+**Message Payload:**
+```json
+{
+  "documentId": "60a1e2c3d4e5f6a7b8c9d0e1",
+  "userId": "johndoe",
+  "content": "Updated content with real-time changes",
+  "timestamp": "2023-05-16T15:05:00Z"
+}
+```
+
+This endpoint is used to send document updates when a user makes changes to a document. The server will broadcast the update to all connected clients.
+
+#### User Join Notification
+
+```
+SEND /app/document.join
+```
+
+**Message Payload:**
+```json
+{
+  "documentId": "60a1e2c3d4e5f6a7b8c9d0e1",
+  "userId": "johndoe",
+  "content": null,
+  "timestamp": "2023-05-16T15:00:00Z"
+}
+```
+
+This endpoint is used to notify when a user joins a document editing session. The server will broadcast the join notification to all connected clients.
+
+#### User Leave Notification
+
+```
+SEND /app/document.leave
+```
+
+**Message Payload:**
+```json
+{
+  "documentId": "60a1e2c3d4e5f6a7b8c9d0e1",
+  "userId": "johndoe",
+  "content": null,
+  "timestamp": "2023-05-16T16:00:00Z"
+}
+```
+
+This endpoint is used to notify when a user leaves a document editing session. The server will broadcast the leave notification to all connected clients.
+
+#### Subscribe to Document Updates
+
+```
+SUBSCRIBE /topic/document.{documentId}
+```
+
+Clients subscribe to this topic to receive real-time updates for a specific document.
+
+#### Subscribe to User Join Notifications
+
+```
+SUBSCRIBE /topic/document.{documentId}.join
+```
+
+Clients subscribe to this topic to receive notifications when users join a document editing session.
+
+#### Subscribe to User Leave Notifications
+
+```
+SUBSCRIBE /topic/document.{documentId}.leave
+```
+
+Clients subscribe to this topic to receive notifications when users leave a document editing session.
+
+## Error Handling
+
+The application uses a global exception handler to handle various types of exceptions and return appropriate HTTP status codes and error messages.
+
+Common error responses:
+
+```json
+{
+  "status": 404,
+  "message": "Document not found",
+  "timestamp": "2023-05-16T15:30:00Z"
+}
+```
+
+```json
+{
+  "status": 403,
+  "message": "You do not have permission to edit this document",
+  "timestamp": "2023-05-16T15:35:00Z"
+}
+```
+
+```json
+{
+  "status": 401,
+  "message": "Invalid authentication token",
+  "timestamp": "2023-05-16T15:40:00Z"
+}
+```
 
 ## Running the Application
 

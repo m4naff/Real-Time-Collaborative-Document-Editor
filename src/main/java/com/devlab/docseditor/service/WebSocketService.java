@@ -75,7 +75,7 @@ public class WebSocketService {
             message.setContent(newContent);
             messagingTemplate.convertAndSend("/topic/document." + documentId, message);
 
-            if (Math.random() < 0.8) { // 10% chance to save on each update
+            if (Math.random() < 0.8) { // 80% chance to save on each update
                 documentService.updateDocument(documentId, newContent, userId);
                 log.debug("Saved document {} to database", documentId);
             }
